@@ -1,12 +1,11 @@
 from django.conf.urls import url
 from django.urls import path, include
-from . import views
 from django.contrib import admin
+from . import views 
 
-app_name = 'programme_curriculum'
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    # path('admin/', admin.site.urls),
     path('', views.programme_curriculum, name='programme_curriculum'),
 
     path('programmes/', views.view_all_programmes, name='view_all_programmes'),
@@ -22,7 +21,7 @@ urlpatterns = [
     
 
     path('admin_programmes/', views.admin_view_all_programmes, name='admin_view_all_programmes'),
-    path('admin_working_curriculums/', views.admin_view_all_working_curriculums, name='admin_view_all_working_curriculums'),
+    path('admin_working_curriculums/', views.Admin_view_all_working_curriculums, name='admin_view_all_working_curriculums'),
     path('admin_curriculums/<programme_id>/', views.admin_view_curriculums_of_a_programme, name='admin_view_curriculums_of_a_programme'),
     path('admin_curriculum_semesters/<curriculum_id>/', views.admin_view_semesters_of_a_curriculum, name='admin_view_semesters_of_a_curriculum'),
     path('admin_semester/<semester_id>/', views.admin_view_a_semester_of_a_curriculum, name='admin_view_a_semester_of_a_curriculum'),
@@ -72,7 +71,5 @@ urlpatterns = [
     path('file_unarchive/<FileId>/',views.file_unarchive,name='file_unarchive'),
     
 
-    # urls for api view
-    path('api/',include('applications.programme_curriculum.api.urls'))
-
+    
 ]
