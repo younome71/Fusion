@@ -405,49 +405,44 @@ def Admin_view_all_working_curriculums(request):
     return JsonResponse({'curriculums': curriculum_data}, safe=False)
 
 def admin_view_semesters_of_a_curriculum(request, curriculum_id):
-    """ gets all the semesters of a specfic curriculum """
+    """API endpoint to get all semesters of a specific curriculum for React frontend."""
+        
+    # Check user permissions
+    # if request.session['currentDesignationSelected'] in ["student", "Associate Professor", "Professor", "Assistant Professor"] or ('hod' in request.session['currentDesignationSelected'].lower() and str(request.user) != "acadadmin"):
+    #     return JsonResponse({'error': 'Unauthorized access'}, status=403)
 
-    user_details = ExtraInfo.objects.get(user = request.user)
-    des = HoldsDesignation.objects.all().filter(user = request.user).first()
-    if request.session['currentDesignationSelected']== "student" or request.session['currentDesignationSelected']== "Associate Professor" or request.session['currentDesignationSelected']== "Professor" or request.session['currentDesignationSelected']== "Assistant Professor" :
-        return HttpResponseRedirect('/programme_curriculum/programmes/')
-    elif str(request.user) == "acadadmin" :
-        pass
-    elif 'hod' in request.session['currentDesignationSelected'].lower():
-        return HttpResponseRedirect('/programme_curriculum/programmes/')
-    
     curriculum = get_object_or_404(Curriculum, Q(id=curriculum_id))
-    semesters = curriculum.semesters
+    semesters = curriculum.semesters.all()
+
+    # Prepare semesters data
     semester_slots = []
-    for sem in semesters:
-        a = list(sem.courseslots)
-        semester_slots.append(a)
-
-    max_length = 0
-    for course_slots in semester_slots:
-        max_length = max(max_length, len(course_slots))
-
-    for course_slots in semester_slots:
-        course_slots += [""] * (max_length - len(course_slots))
-
     semester_credits = []
 
     for semester in semesters:
-        credits_sum = 0
-        for course_slot in semester.courseslots:
-            max_credit = 0
-            courses = course_slot.courses.all()
-            for course in courses:
-                max_credit = max(max_credit, course.credit)
-            credits_sum = credits_sum + max_credit
+        slots = list(semester.courseslots.values('id', 'type', 'name'))
+        semester_slots.append(slots)
+        
+        credits_sum = sum(max(course.credit for course in slot.courses.all()) for slot in semester.courseslots.all())
         semester_credits.append(credits_sum)
-    
-    transpose_semester_slots = list(zip(*semester_slots))
 
-    all_batches = Batch.objects.filter(running_batch=True).exclude(curriculum=curriculum_id).order_by('year')
+    # Organize data for React frontend
+    curriculum_data = {
+        'curriculum_id': curriculum.id,
+        'curriculum_name': curriculum.name,
+        'version': curriculum.version,
+        'semesters': [
+            {
+                'semester_no': sem.semester_no,
+                'start_semester': sem.start_semester,
+                'end_semester': sem.end_semester,
+                'slots': semester_slots[index],
+                'credits': semester_credits[index]
+            }
+            for index, sem in enumerate(semesters)
+        ]
+    }
 
-    return render(request, 'programme_curriculum/acad_admin/admin_view_semesters_of_a_curriculum.html', {'curriculum': curriculum, 'semesters': semesters, 'semester_slots': transpose_semester_slots, 'semester_credits': semester_credits, 'all_batches':all_batches})
-
+    return JsonResponse(curriculum_data)
 
 def admin_view_a_semester_of_a_curriculum(request, semester_id):
     """
@@ -595,7 +590,7 @@ def admin_view_all_discplines(request):
     for discipline in disciplines:
         programmes = discipline.programmes.all()  # Get programmes related to the discipline
         programme_list = [
-            {'name': programme.name} for programme in programmes
+            {'name': programme.name,'id':programme.id} for programme in programmes
         ]  # Assuming Programme has name and acronym attributes
 
         data.append({
