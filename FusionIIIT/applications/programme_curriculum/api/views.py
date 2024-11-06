@@ -395,6 +395,7 @@ def Admin_view_all_working_curriculums(request):
     curriculum_data = []
     for curriculum in curriculums:
         curriculum_data.append({
+            'id':curriculum.id,
             'name': curriculum.name,
             'version': str(curriculum.version),  # Convert Decimal to string for JSON compatibility
             'batch': [str(batch) for batch in curriculum.batches],  # Use batches property from model
@@ -418,77 +419,168 @@ def admin_view_semesters_of_a_curriculum(request, curriculum_id):
     semester_slots = []
     semester_credits = []
 
+    semester_data = []
     for semester in semesters:
-        slots = list(semester.courseslots.values('id', 'type', 'name'))
-        semester_slots.append(slots)
+        # For each slot in the semester, retrieve associated courses
+        slots = []
+        for slot in semester.courseslots.all():
+            courses = list(slot.courses.values('id', 'name', 'code', 'credit','tutorial_hours','lecture_hours'))  # Adjust fields as needed
+            slots.append({
+                'id': slot.id,
+                'type': slot.type,
+                'name': slot.name,
+                'courses': courses
+            })
         
-        credits_sum = sum(max(course.credit for course in slot.courses.all()) for slot in semester.courseslots.all())
-        semester_credits.append(credits_sum)
-
-    # Organize data for React frontend
+        # Calculate total credits for the semester based on maximum credit of each course slot
+        credits_sum = sum(max(course['credit'] for course in slot['courses']) if slot['courses'] else 0 for slot in slots)
+        
+        semester_data.append({
+            'id':semester.id,
+            'semester_no': semester.semester_no,
+            'start_semester': semester.start_semester,
+            'end_semester': semester.end_semester,
+            'slots': slots,
+            'credits': credits_sum
+        })
+    all_batches = Batch.objects.filter(running_batch=True, curriculum=curriculum_id).order_by('year')
+    batch_data = [
+        {
+            'id': batch.id,
+            'name': batch.name,
+            'discipline': batch.discipline.acronym,  # Use acronym or other attributes if available in Discipline
+            'year': batch.year,
+            'running_batch': batch.running_batch
+        } for batch in all_batches
+    ]
     curriculum_data = {
         'curriculum_id': curriculum.id,
         'curriculum_name': curriculum.name,
         'version': curriculum.version,
-        'semesters': [
-            {
-                'semester_no': sem.semester_no,
-                'start_semester': sem.start_semester,
-                'end_semester': sem.end_semester,
-                'slots': semester_slots[index],
-                'credits': semester_credits[index]
-            }
-            for index, sem in enumerate(semesters)
-        ]
+        'batches':batch_data,
+        'semesters': semester_data
     }
 
     return JsonResponse(curriculum_data)
 
 def admin_view_a_semester_of_a_curriculum(request, semester_id):
-    """
-    This function is used to Display all Semester of a Curriculum.
+    # user_details = ExtraInfo.objects.get(user=request.user)
+    # des = HoldsDesignation.objects.filter(user=request.user).first()
 
-    @param:
-        curriculum_id - Id of a specific curriculum
-        
-    @variables:
-        transpose_semester_slots - semester_slots 2D list is transpose for viewing in HTML <table>.
-        semester_credits - Total Credits for each semester.
-    """
-    user_details = ExtraInfo.objects.get(user = request.user)
-    des = HoldsDesignation.objects.all().filter(user = request.user).first()
-    if request.session['currentDesignationSelected']== "student" or request.session['currentDesignationSelected']== "Associate Professor" or request.session['currentDesignationSelected']== "Professor" or request.session['currentDesignationSelected']== "Assistant Professor" :
-        return HttpResponseRedirect('/programme_curriculum/programmes/')
-    elif str(request.user) == "acadadmin" :
-        pass
-    elif 'hod' in request.session['currentDesignationSelected'].lower():
-        return HttpResponseRedirect('/programme_curriculum/programmes/')
+    # # Access Control
+    # if request.session['currentDesignationSelected'] in ["student", "Associate Professor", "Professor", "Assistant Professor"]:
+    #     return JsonResponse({'error': 'Access denied'}, status=403)
+    # elif str(request.user) == "acadadmin" or 'hod' in request.session['currentDesignationSelected'].lower():
+    #     pass
+    # else:
+    #     return JsonResponse({'error': 'Access denied'}, status=403)
     
-    semester = get_object_or_404(Semester, Q(id=semester_id))
-    course_slots = semester.courseslots
+    # Get semester and course slots
+    semester = get_object_or_404(Semester, id=semester_id)
+    course_slots = semester.courseslot_set.all()
 
-    return render(request, 'programme_curriculum/acad_admin/admin_view_a_semester_of_a_curriculum.html', {'semester': semester, 'course_slots': course_slots})
+    # Prepare JSON response
+    # print(semester.curriculum)
+    semester_data = {
+        'id': semester.id,
+        'semester_no':semester.semester_no,
+        'curriculum':semester.curriculum.name,
+        'curriculum_version':semester.curriculum.version,
+        'instigate_semester':semester.instigate_semester,
+        'start_semester':semester.start_semester,
+        'end_semester':semester.end_semester,
+        'semester_info':semester.semester_info,
+        'course_slots': [
+            {
+                'id': slot.id,
+                'name': slot.name,
+                'type': slot.type,
+                'course_slot_info': slot.course_slot_info,
+                'duration': slot.duration,
+                'min_registration_limit': slot.min_registration_limit,
+                'max_registration_limit': slot.max_registration_limit,
+                'courses': [
+                    {
+                        'id': course.id,
+                        'code': course.code,
+                        'name': course.name,
+                        'credit': course.credit
+                    } for course in slot.courses.all()
+                ]
+            }
+            for slot in course_slots
+        ]
+    }
 
+    return JsonResponse(semester_data, safe=False)
 
 def admin_view_a_courseslot(request, courseslot_id):
-    """ view a course slot """
+    """API to view a course slot"""
 
-    user_details = ExtraInfo.objects.get(user = request.user)
-    des = HoldsDesignation.objects.all().filter(user = request.user).first()
-    if request.session['currentDesignationSelected']== "student" or request.session['currentDesignationSelected']== "Associate Professor" or request.session['currentDesignationSelected']== "Professor" or request.session['currentDesignationSelected']== "Assistant Professor" :
-        return HttpResponseRedirect('/programme_curriculum/programmes/')
-    elif str(request.user) == "acadadmin" :
-        pass
-    elif 'hod' in request.session['currentDesignationSelected'].lower():
-        return HttpResponseRedirect('/programme_curriculum/programmes/')
-    
-    edit = request.POST.get('edit', -1)
+    # # Check user designation and role
+    # user_details = ExtraInfo.objects.get(user=request.user)
+    # des = HoldsDesignation.objects.filter(user=request.user).first()
+    # current_designation = request.session.get('currentDesignationSelected', '').lower()
+
+    # if current_designation in ["student", "associate professor", "professor", "assistant professor"]:
+    #     return JsonResponse({'redirect': '/programme_curriculum/programmes/'}, status=302)
+    # elif str(request.user) == "acadadmin":
+    #     pass
+    # elif 'hod' in current_designation:
+    #     return JsonResponse({'redirect': '/programme_curriculum/programmes/'}, status=302)
+
+    # Get course slot and check for edit mode
     course_slot = get_object_or_404(CourseSlot, Q(id=courseslot_id))
-    if edit == course_slot.id:
-        return render(request, 'programme_curriculum/acad_admin/admin_edit_semesters_view_a_courseslot.html', {'course_slot': course_slot})
-    
-    return render(request, 'programme_curriculum/acad_admin/admin_view_a_courseslot.html', {'course_slot': course_slot})
+    edit = request.POST.get('edit', -1)
 
+    if edit == str(course_slot.id):
+        # Return edit information
+        return JsonResponse({
+            'course_slot': {
+                'id': course_slot.id,
+                'name': course_slot.name,
+                'semester':course_slot.semester,
+                'type':course_slot.type,
+                'course_slot_info':course_slot.course_slot_info,
+                'duration':course_slot.duration,
+                'min_registration_limit':course_slot.min_registration_limit,
+                'max_registration_limit':course_slot.max_registration_limit,
+                
+                # Add other fields as necessary
+            },
+            'edit': True
+        })
+
+    # Default response if not in edit mode
+    print(course_slot.semester.curriculum)
+    return JsonResponse({
+        'course_slot': {
+            'id': course_slot.id,
+            'name': course_slot.name,
+            'type':course_slot.type,
+            'course_slot_info':course_slot.course_slot_info,
+            'duration':course_slot.duration,
+            'min_registration_limit':course_slot.min_registration_limit,
+            'max_registration_limit':course_slot.max_registration_limit,
+            "courses": [
+            {
+                "id": course.id,
+                "code":course.code,
+                "name": course.name,
+                "credit": course.credit,
+               
+            } for course in course_slot.courses.all()
+            ],
+            "curriculum": {
+                "id": course_slot.semester.curriculum.id,
+                "name": course_slot.semester.curriculum.name,
+                "version": course_slot.semester.curriculum.version,
+                "semester_no":course_slot.semester.semester_no,
+            }
+                
+        },
+        'edit': False
+    })
 
 @api_view(['GET'])
 def admin_view_all_courses(request):

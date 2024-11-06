@@ -46,7 +46,7 @@ class CurriculumBatchSerializer(serializers.ModelSerializer):
 class CurriculumSerializer(serializers.ModelSerializer):
     class Meta:
         model = Curriculum
-        fields = ['name', 'version', 'batches', 'no_of_semester']
+        fields = ['id','name', 'version', 'batches', 'no_of_semester']
 
     def to_representation(self, instance):
         representation = super().to_representation(instance)
@@ -54,6 +54,7 @@ class CurriculumSerializer(serializers.ModelSerializer):
         representations = []
         for batch in batches:
             batch_representation = {
+                'id':representation['id'],
                 'name': representation['name'],
                 'version': representation['version'],
                 'no_of_semester': representation['no_of_semester'],
