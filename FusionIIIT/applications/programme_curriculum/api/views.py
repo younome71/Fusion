@@ -13,10 +13,13 @@ from ..filters import CourseFilter, BatchFilter, CurriculumFilter
 from .serializers import CourseSerializer,CurriculumSerializer
 from django.db import IntegrityError
 from django.utils import timezone
+from django.forms.models import model_to_dict
+import json
 
 from rest_framework.response import Response
 from rest_framework.decorators import api_view
 from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework import status
 
 from notification.views import prog_and_curr_notif
@@ -86,40 +89,58 @@ def view_all_programmes(request):
 
 def view_curriculums_of_a_programme(request, programme_id):
     """
-    This function is used to Display Curriculum of a specific Programmes.
+    This function is used to Display Curriculum of a specific Programmes in JSON format.
 
     @param:
         programme_id - Id of a specific programme
         
     @variables:
         curriculums - Curriculums of a specific programmes
-        batches - List of batches for curriculums
-        working_curriculum - Curriculums that are affective
-        past_curriculum - Curriculums thet are obsolete
+        working_curriculum - Curriculums that are active
+        past_curriculum - Curriculums that are obsolete
     """
-    url='programme_curriculum/'
-    user_details = ExtraInfo.objects.get(user = request.user)
-    des = HoldsDesignation.objects.all().filter(user = request.user).first()
-    if  request.session['currentDesignationSelected']== "acadadmin":
-        return render(request, 'programme_curriculum/admin_programmes/')
+    # user_details = ExtraInfo.objects.get(user=request.user)
+    # des = HoldsDesignation.objects.filter(user=request.user).first()
+    
+    # Commented out role-based URL adjustments
+    # if request.session['currentDesignationSelected'] == "acadadmin":
+    #     return render(request, 'programme_curriculum/admin_programmes/')
         
-    elif request.session['currentDesignationSelected']== "Associate Professor" or request.session['currentDesignationSelected']== "Professor" or request.session['currentDesignationSelected']== "Assistant Professor" or request.session['currentDesignationSelected']== "Dean Academic" :
-        url+='faculty/'
+    # elif request.session['currentDesignationSelected'] in ["Associate Professor", "Professor", "Assistant Professor", "Dean Academic"]:
+    #     url += 'faculty/'
         
-    elif 'hod' in request.session['currentDesignationSelected'].lower():
-        url+='faculty/'
-    notifs = request.user.notifications.all()
-    program = get_object_or_404(Programme, Q(id=programme_id))
-    curriculums = program.curriculums
+    # elif 'hod' in request.session['currentDesignationSelected'].lower():
+    #     url += 'faculty/'
 
+    # Fetch program and related curriculums
+    program = get_object_or_404(Programme, id=programme_id)
+    curriculums = program.curriculums.all()  # Adjust if it's a related name
+
+    # Apply filters
     curriculumfilter = CurriculumFilter(request.GET, queryset=curriculums)
-
     curriculums = curriculumfilter.qs
 
+    # Separate working and past curriculums
+    batches = Batch.objects.all()
     working_curriculums = curriculums.filter(working_curriculum=1)
     past_curriculums = curriculums.filter(working_curriculum=0)
-    url+='view_curriculums_of_a_programme.html'
-    return render(request,url, {'program': program, 'past_curriculums': past_curriculums, 'working_curriculums': working_curriculums, 'curriculumfilter': curriculumfilter,'notifications': notifs,})
+
+    # Prepare JSON data
+    data = {
+        'program': model_to_dict(program),
+        # 'working_curriculums': [model_to_dict(c) for c in working_curriculums],
+        'working_curriculums': [
+            {
+                **model_to_dict(c),
+                'batches': [model_to_dict(b) for b in c.batches.all()]  # Add batches for each curriculum
+            }
+            for c in working_curriculums
+        ],
+        'past_curriculums': [model_to_dict(c) for c in past_curriculums],
+        # 'notifications': [model_to_dict(n) for n in request.user.notifications.all()]
+    }
+
+    return JsonResponse(data)
 
 
 def view_all_working_curriculums(request):
@@ -145,117 +166,198 @@ def view_all_working_curriculums(request):
     return render(request,url+'view_all_working_curriculums.html',{'curriculums':curriculums, 'curriculumfilter': curriculumfilter,'notifications': notifs,})
 
 def view_semesters_of_a_curriculum(request, curriculum_id):
-    """
-    This function is used to Display all Semester of a Curriculum.
+    """ API to get all the semesters of a specific curriculum """
 
-    @param:
-        curriculum_id - Id of a specific curriculum
-        
-    @variables:
-        transpose_semester_slots - semester_slots 2D list is transpose for viewing in HTML <table>.
-        semester_credits - Total Credits for each semester.
-    """
-    url='programme_curriculum/'
-    user_details = ExtraInfo.objects.get(user = request.user)
-    des = HoldsDesignation.objects.all().filter(user = request.user).first()
-    if  request.session['currentDesignationSelected']== "acadadmin":
-        return render(request, 'programme_curriculum/admin_programmes/')
-    
-        
-    elif request.session['currentDesignationSelected']== "Associate Professor" or request.session['currentDesignationSelected']== "Professor" or request.session['currentDesignationSelected']== "Assistant Professor" or request.session['currentDesignationSelected']== "Dean Academic" :
-        url+='faculty/'
-        
-    elif 'hod' in request.session['currentDesignationSelected'].lower():
-        url+='faculty/'
+    # user_details = ExtraInfo.objects.get(user=request.user)
+    # des = HoldsDesignation.objects.all().filter(user=request.user).first()
+
+    # # Redirect logic based on user designation
+    # if request.session['currentDesignationSelected'] in ["student", "Associate Professor", "Professor", "Assistant Professor"]:
+    #     return HttpResponseRedirect('/programme_curriculum/programmes/')
+    # elif str(request.user) == "acadadmin":
+    #     pass
+    # elif 'hod' in request.session['currentDesignationSelected'].lower():
+    #     return HttpResponseRedirect('/programme_curriculum/programmes/')
+
     curriculum = get_object_or_404(Curriculum, Q(id=curriculum_id))
-    notifs = request.user.notifications.all()
-    semesters = curriculum.semesters
+    semesters = curriculum.semesters.all()
+
     semester_slots = []
     for sem in semesters:
-        a = list(sem.courseslots)
+        a = list(sem.courseslots.all())
         semester_slots.append(a)
 
-    max_length = 0
-    for course_slots in semester_slots:
-        max_length = max(max_length, len(course_slots))
-
+    # Pad the course slots to ensure even length
+    max_length = max(len(course_slots) for course_slots in semester_slots)
     for course_slots in semester_slots:
         course_slots += [""] * (max_length - len(course_slots))
 
+    # Calculate total credits for each semester
     semester_credits = []
-
     for semester in semesters:
         credits_sum = 0
-        for course_slot in semester.courseslots:
-            max_credit = 0
-            courses = course_slot.courses.all()
-            for course in courses:
-                max_credit = max(max_credit, course.credit)
-            credits_sum = credits_sum + max_credit
+        for course_slot in semester.courseslots.all():
+            max_credit = max(course.credit for course in course_slot.courses.all())
+            credits_sum += max_credit
         semester_credits.append(credits_sum)
-    
+
+    # Transpose the semester slots for easy tabular representation
     transpose_semester_slots = list(zip(*semester_slots))
 
-    return render(request, url+'view_semesters_of_a_curriculum.html', {'curriculum': curriculum, 'semesters': semesters, 'semester_slots': transpose_semester_slots, 'semester_credits': semester_credits,'notifications': notifs,})
+    # Get all batches excluding the current curriculum
+    all_batches = Batch.objects.filter(running_batch=True, curriculum=curriculum_id).order_by('year')
+
+    # Prepare the response data structure
+    data = {
+        'name': curriculum.name,
+        'no_of_semester': len(semesters),
+        'semesters': [{
+            'id': sem.id,
+            'semester_no': sem.semester_no,
+            'start_semester': sem.start_semester,  # Add any other fields needed by the frontend
+            'end_semester': sem.end_semester,
+            'instigate_semester': sem.instigate_semester,
+        } for sem in semesters],
+        'semester_slots': [
+            [{
+                'id': course_slot.id,
+                'name': course_slot.name,
+                'courses': [{'name': course.name, 'lecture_hours': course.lecture_hours, 'tutorial_hours': course.tutorial_hours, 'credit': course.credit} for course in course_slot.courses.all()]
+            } if course_slot else None for course_slot in course_slots]
+            for course_slots in transpose_semester_slots
+        ],
+        'semester_credits': semester_credits,
+        'batches': list(all_batches.values_list('name', 'year'))
+    }
+
+    # Return the data as a JSON response for the frontend
+    return JsonResponse(data)
 
 
 def view_a_semester_of_a_curriculum(request, semester_id):
-    """ views a specfic semester of a specfic curriculum """
-    url='programme_curriculum/'
-    user_details = ExtraInfo.objects.get(user = request.user)
-    des = HoldsDesignation.objects.all().filter(user = request.user).first()
-    if  request.session['currentDesignationSelected']== "acadadmin":
-        return render(request, 'programme_curriculum/admin_programmes/')
+    """
+    Retrieve and return details of a specific semester of a specific curriculum in JSON format.
+    
+    Args:
+    - semester_id: The ID of the semester to fetch.
+    
+    Returns:
+    - JSON response containing semester details and associated course slots.
+    """
+    # Fetch the specific semester or return a 404 if not found
+    semester = get_object_or_404(Semester, id=semester_id)
 
-    elif request.session['currentDesignationSelected']== "Associate Professor" or request.session['currentDesignationSelected']== "Professor" or request.session['currentDesignationSelected']== "Assistant Professor" or request.session['currentDesignationSelected']== "Dean Academic" :
-        url+='faculty/'
-        
-    elif 'hod' in request.session['currentDesignationSelected'].lower():
-        url+='faculty/'
-    semester = get_object_or_404(Semester, Q(id=semester_id))
-    course_slots = semester.courseslots
-    notifs = request.user.notifications.all()
+    # Fetch the associated course slots for the semester
+    course_slots = semester.courseslots  # Using the property defined in the Semester model
+    
+    # Prepare data for the semester and its course slots
+    semester_data = {
+        'id': semester.id,
+        'curriculum': semester.curriculum.name,  # Get the curriculum name
+        'semester_no': semester.semester_no,  # Use semester_no from the Semester model
+        'start_semester': semester.start_semester.isoformat() if semester.start_semester else None,
+        'end_semester': semester.end_semester.isoformat() if semester.end_semester else None,
+        'instigate_semester': semester.instigate_semester,
+        'semester_info': semester.semester_info,
+        'course_slots': [
+            {
+                'id': slot.id,
+                'type': slot.type,  # Assuming the CourseSlot model has a 'type' field
+                'course_slot_info': slot.course_slot_info,  # Assuming this field exists in CourseSlot
+                'duration': slot.duration,  # Assuming this field exists
+                'name': slot.name,
+                'courses': [
+                    {
+                        'id': course.id,
+                        'code': course.code,
+                        'name': course.name,
+                        'credits': course.credit,
+                    } for course in slot.courses.all()  # Fetch related courses for each slot
+                ]
+            } for slot in course_slots
+        ]
+    }
 
-    return render(request, url+'view_a_semester_of_a_curriculum.html', {'semester': semester, 'course_slots': course_slots,'notifications': notifs,})
+    # Return the semester and course slot details as JSON
+    return JsonResponse({'semester': semester_data})
 
 
 def view_a_courseslot(request, courseslot_id):
     """ view a course slot """
-    url='programme_curriculum/'
-    user_details = ExtraInfo.objects.get(user = request.user)
-    des = HoldsDesignation.objects.all().filter(user = request.user).first()
-    if  request.session['currentDesignationSelected']== "acadadmin":
-        return render(request, 'programme_curriculum/admin_programmes/') 
-    elif request.session['currentDesignationSelected']== "Associate Professor" or request.session['currentDesignationSelected']== "Professor" or request.session['currentDesignationSelected']== "Assistant Professor" or request.session['currentDesignationSelected']== "Dean Academic" :
-        url+='faculty/'
+    # user_details = ExtraInfo.objects.get(user=request.user)
+    # des = HoldsDesignation.objects.all().filter(user=request.user).first()
     
-    elif 'hod' in request.session['currentDesignationSelected'].lower():
-        url+='faculty/'
-    course_slot = get_object_or_404(CourseSlot, Q(id=courseslot_id))
-    notifs = request.user.notifications.all()
-    return render(request, url+'view_a_courseslot.html', {'course_slot': course_slot,'notifications': notifs,})
+    # if request.session['currentDesignationSelected'] == "acadadmin":
+    #     # Return relevant response for 'acadadmin'
+    #     return JsonResponse({'message': 'Unauthorized for this operation'}, status=403)
+    
+    # elif request.session['currentDesignationSelected'] in ["Associate Professor", "Professor", "Assistant Professor", "Dean Academic"]:
+    #     # Handling for faculty members
+    #     user_type = "faculty"
+    
+    # elif 'hod' in request.session['currentDesignationSelected'].lower():
+    #     # Handling for hod
+    #     user_type = "faculty"
+    
+    # else:
+    #     # Default case if no designation matched
+    #     return JsonResponse({'message': 'Invalid designation'}, status=403)
+
+    # Fetch the course slot details
+    course_slot = get_object_or_404(CourseSlot, id=courseslot_id)
+    
+    # Prepare the course slot data to return in JSON format
+    data = {
+        'id': course_slot.id,
+        'name': course_slot.name,
+        'semester': course_slot.semester.__str__(),  # You can use str or a specific field from the semester
+        'type': course_slot.type,
+        'course_slot_info': course_slot.course_slot_info,
+        'min_registration_limit': course_slot.min_registration_limit,
+        'max_registration_limit': course_slot.max_registration_limit,
+        'duration': course_slot.duration,
+        'courses': [
+            {
+                'id': course.id,
+                'code': course.code,
+                'name': course.name,
+                'credit': course.credit,
+            } for course in course_slot.courses.all()
+        ]
+    }
+    
+    # Return the course slot data as a JSON response
+    return JsonResponse(data)
 
 
 def view_all_courses(request):
-    """ views all the course slots of a specfic semester """
-    url='programme_curriculum/'
-    user_details = ExtraInfo.objects.get(user = request.user)
-    des = HoldsDesignation.objects.all().filter(user = request.user).first()
-    if  request.session['currentDesignationSelected']== "acadadmin":
-        return render(request, 'programme_curriculum/admin_programmes/')
-    elif request.session['currentDesignationSelected']== "Associate Professor" or request.session['currentDesignationSelected']== "Professor" or request.session['currentDesignationSelected']== "Assistant Professor" or request.session['currentDesignationSelected']== "Dean Academic" :
-
-        url+='faculty/'
+    """
+    Retrieve and return details of all courses in JSON format.
     
-    elif 'hod' in request.session['currentDesignationSelected'].lower():
-        url+='faculty/'
+    Returns:
+    - JSON response containing a list of courses.
+    """
+    # Fetch all courses
     courses = Course.objects.all()
-    notifs = request.user.notifications.all()
 
+    # Apply filtering based on request parameters (if any)
     coursefilter = CourseFilter(request.GET, queryset=courses)
+    filtered_courses = coursefilter.qs
 
-    courses = coursefilter.qs
-    return render(request, url+'view_all_courses.html', {'courses': courses, 'coursefilter': coursefilter,'notifications': notifs,})
+    # Prepare the data to return in JSON format
+    courses_data = [
+        {
+            'id': course.id,
+            'code': course.code,
+            'name': course.name,
+            'credit': course.credit,
+            'department': course.department.name,  # Assuming course has a department relation
+            'semester': course.semester.__str__(),  # You can change this based on the relation structure
+        } for course in filtered_courses
+    ]
+
+    # Return the filtered courses as a JSON response
+    return JsonResponse({'courses': courses_data})
 
 
 def view_a_course(request, course_id):
@@ -325,31 +427,32 @@ def view_all_batches(request):
 # ------------Acad-Admin-functions---------------#
 
 
-@api_view(['GET'])
-@login_required(login_url='/accounts/login')
+# @api_view(['GET'])
+# @login_required(login_url='/accounts/login')
 def admin_view_all_programmes(request):
     """
     API to return all programmes (UG, PG, PhD) for an admin user.
     """
-    user_details = ExtraInfo.objects.get(user=request.user)
-    des = HoldsDesignation.objects.filter(user=request.user).first()
-    
-    # if request.session['currentDesignationSelected'] in ["student", "Associate Professor", "Professor", "Assistant Professor"]:
-    #     return Response({"error": "Access Denied"}, status=status.HTTP_403_FORBIDDEN)
-    # elif str(request.user) != "acadadmin" and 'hod' in request.session['currentDesignationSelected'].lower():
-    #     return Response({"error": "Access Denied"}, status=status.HTTP_403_FORBIDDEN)
-    
     # Fetch programmes based on their category
-    ug = Programme.objects.filter(category='UG').prefetch_related('discipline_set').values('id', 'name', 'category', 'programme_begin_year', 'discipline__name')
-    pg = Programme.objects.filter(category='PG').prefetch_related('discipline_set').values('id', 'name', 'category', 'programme_begin_year', 'discipline__name')
-    phd = Programme.objects.filter(category='PHD').prefetch_related('discipline_set').values('id', 'name', 'category', 'programme_begin_year', 'discipline__name')
+    ug = Programme.objects.filter(category='UG').prefetch_related('discipline_set').values(
+        'id', 'name', 'category', 'programme_begin_year', 'discipline__name'
+    )
+    pg = Programme.objects.filter(category='PG').prefetch_related('discipline_set').values(
+        'id', 'name', 'category', 'programme_begin_year', 'discipline__name'
+    )
+    phd = Programme.objects.filter(category='PHD').prefetch_related('discipline_set').values(
+        'id', 'name', 'category', 'programme_begin_year', 'discipline__name'
+    )
 
-    # Return JSON response with all programmes
-    return Response({
+    # Prepare the JSON response data
+    response_data = {
         'ug_programmes': list(ug),
         'pg_programmes': list(pg),
         'phd_programmes': list(phd)
-    }, status=status.HTTP_200_OK)
+    }
+
+    # Return a JsonResponse
+    return JsonResponse(response_data, status=200, safe=False)
 
 @api_view(['GET'])
 def admin_view_curriculums_of_a_programme(request, programme_id):
@@ -365,11 +468,12 @@ def admin_view_curriculums_of_a_programme(request, programme_id):
             'id': program.id,
             'name': program.name,
             'category': program.category,
+            'beginyear': program.programme_begin_year,
         },
         'working_curriculums': CurriculumSerializer(working_curriculums, many=True).data,
         'past_curriculums': CurriculumSerializer(past_curriculums, many=True).data,
     }
-    return Response(data)
+    return JsonResponse(data)
 
 @api_view(['GET'])
 def Admin_view_all_working_curriculums(request):
@@ -752,27 +856,45 @@ def admin_view_all_batches(request):
     })
 
 
-def add_discipline_form(request):
+# def add_discipline_form(request):
 
-    user_details = ExtraInfo.objects.get(user = request.user)
-    des = HoldsDesignation.objects.all().filter(user = request.user).first()
-    if request.session['currentDesignationSelected']== "student" or request.session['currentDesignationSelected']== "Associate Professor" or request.session['currentDesignationSelected']== "Professor" or request.session['currentDesignationSelected']== "Assistant Professor" :
-        return HttpResponseRedirect('/programme_curriculum/programmes/')
-    elif str(request.user) == "acadadmin" :
-        pass
-    elif 'hod' in request.session['currentDesignationSelected'].lower():
-        return HttpResponseRedirect('/programme_curriculum/programmes/')
+#     user_details = ExtraInfo.objects.get(user = request.user)
+#     des = HoldsDesignation.objects.all().filter(user = request.user).first()
+#     if request.session['currentDesignationSelected']== "student" or request.session['currentDesignationSelected']== "Associate Professor" or request.session['currentDesignationSelected']== "Professor" or request.session['currentDesignationSelected']== "Assistant Professor" :
+#         return HttpResponseRedirect('/programme_curriculum/programmes/')
+#     elif str(request.user) == "acadadmin" :
+#         pass
+#     elif 'hod' in request.session['currentDesignationSelected'].lower():
+#         return HttpResponseRedirect('/programme_curriculum/programmes/')
     
-    form = DisciplineForm()
-    submitbutton= request.POST.get('Submit')
-    if submitbutton:
-        if request.method == 'POST':
-            form = DisciplineForm(request.POST)  
+#     form = DisciplineForm()
+#     submitbutton= request.POST.get('Submit')
+#     if submitbutton:
+#         if request.method == 'POST':
+#             form = DisciplineForm(request.POST)  
+#             if form.is_valid():
+#                 form.save()
+#                 messages.success(request, "Added Discipline successful")
+#                 return HttpResponseRedirect('/programme_curriculum/admin_disciplines/')    
+#     return render(request, 'programme_curriculum/acad_admin/add_discipline_form.html',{'form':form})
+
+@csrf_exempt  # Disable CSRF for simplicity (use a more secure method in production)
+def add_discipline_form(request):
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)  # Parse JSON from the request
+            form = DisciplineForm(data)  # Populate the form with the data
+
             if form.is_valid():
                 form.save()
-                messages.success(request, "Added Discipline successful")
-                return HttpResponseRedirect('/programme_curriculum/admin_disciplines/')    
-    return render(request, 'programme_curriculum/acad_admin/add_discipline_form.html',{'form':form})
+                return JsonResponse({"message": "Discipline added successfully!"}, status=201)
+            else:
+                return JsonResponse({"errors": form.errors}, status=400)
+
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Invalid HTTP method. Use POST."}, status=405)
 
 
 def edit_discipline_form(request, discipline_id):
@@ -800,29 +922,49 @@ def edit_discipline_form(request, discipline_id):
 
 
 
-def add_programme_form(request):
+# def add_programme_form(request):
 
-    user_details = ExtraInfo.objects.get(user = request.user)
-    des = HoldsDesignation.objects.all().filter(user = request.user).first()
-    if request.session['currentDesignationSelected']== "student" or request.session['currentDesignationSelected']== "Associate Professor" or request.session['currentDesignationSelected']== "Professor" or request.session['currentDesignationSelected']== "Assistant Professor" :
-        return HttpResponseRedirect('/programme_curriculum/programmes/')
-    elif str(request.user) == "acadadmin" :
-        pass
-    elif 'hod' in request.session['currentDesignationSelected'].lower():
-        return HttpResponseRedirect('/programme_curriculum/programmes/')
+#     user_details = ExtraInfo.objects.get(user = request.user)
+#     des = HoldsDesignation.objects.all().filter(user = request.user).first()
+#     if request.session['currentDesignationSelected']== "student" or request.session['currentDesignationSelected']== "Associate Professor" or request.session['currentDesignationSelected']== "Professor" or request.session['currentDesignationSelected']== "Assistant Professor" :
+#         return HttpResponseRedirect('/programme_curriculum/programmes/')
+#     elif str(request.user) == "acadadmin" :
+#         pass
+#     elif 'hod' in request.session['currentDesignationSelected'].lower():
+#         return HttpResponseRedirect('/programme_curriculum/programmes/')
     
-    form = ProgrammeForm()
-    submitbutton= request.POST.get('Submit')
-    if submitbutton:
-        if request.method == 'POST':
-            form = ProgrammeForm(request.POST)  
+#     form = ProgrammeForm()
+#     submitbutton= request.POST.get('Submit')
+#     if submitbutton:
+#         if request.method == 'POST':
+#             form = ProgrammeForm(request.POST)  
 
-            if form.is_valid():
-                form.save()
-                programme = Programme.objects.last()
-                messages.success(request, "Added successful")
-                return HttpResponseRedirect('/programme_curriculum/admin_curriculums/' + str(programme.id) + '/')  
-    return render(request,'programme_curriculum/acad_admin/add_programme_form.html',{'form':form, 'submitbutton': submitbutton})
+#             if form.is_valid():
+#                 form.save()
+#                 programme = Programme.objects.last()
+#                 messages.success(request, "Added successful")
+#                 return HttpResponseRedirect('/programme_curriculum/admin_curriculums/' + str(programme.id) + '/')  
+#     return render(request,'programme_curriculum/acad_admin/add_programme_form.html',{'form':form, 'submitbutton': submitbutton})
+
+@csrf_exempt
+def add_programme_form(request):
+    if request.method == 'POST':
+        form = ProgrammeForm(request.POST)
+
+        if form.is_valid():
+            form.save()
+            programme = Programme.objects.last()
+            return JsonResponse({
+                "message": "Programme added successfully",
+                "programme_id": programme.id,
+            })
+        else:
+            return JsonResponse({
+                "error": "Invalid form data",
+                "details": form.errors,
+            }, status=400)
+
+    return JsonResponse({"error": "Invalid request method"}, status=405)
 
 
 
