@@ -30,6 +30,8 @@ urlpatterns = [
     path('admin_course/<course_id>/', views.admin_view_a_course, name='admin_view_a_course'),
     path('admin_disciplines/', views.admin_view_all_discplines, name='admin_view_all_discplines'),
     path('admin_batches/', views.admin_view_all_batches, name='admin_view_all_batches'),
+    path('admin_instructor/',views.admin_view_all_course_instructor,name='admin_view_all_course_instructor'),
+    
     
     path('admin_add_programme/', views.add_programme_form, name='add_programme_form'),
     path('admin_add_discipline/', views.add_discipline_form, name='add_discipline_form'),
